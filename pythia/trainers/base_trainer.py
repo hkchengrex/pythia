@@ -368,8 +368,8 @@ class BaseTrainer:
             self.snapshot_timer.reset()
             gc.collect()
 
-            if "cuda" in str(self.device):
-                torch.cuda.empty_cache()
+            # if "cuda" in str(self.device):
+                # torch.cuda.empty_cache()
 
             if stop is True:
                 self.writer.write("Early stopping activated")
