@@ -97,6 +97,8 @@ optimizer_attributes:
     weight_decay: 0
   type: Adamax
 training_parameters:
+    experiment_name: lorra_textvqa1
+    device: cuda:5
     clip_norm_mode: all
     clip_gradients: true
     max_grad_l2_norm: 0.25
@@ -109,7 +111,7 @@ training_parameters:
     warmup_iterations: 1000
     max_iterations: 24000
     batch_size: 128
-    num_workers: 7
+    num_workers: 4
     task_size_proportional_sampling: true
     monitored_metric: vqa_accuracy
     pretrained_mapping:
