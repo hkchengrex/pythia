@@ -99,6 +99,7 @@ optimizer_attributes:
 training_parameters:
     experiment_name: lorra_textvqa1
     device: cuda:5
+    save_dir: "./save_2"
     clip_norm_mode: all
     clip_gradients: true
     max_grad_l2_norm: 0.25
