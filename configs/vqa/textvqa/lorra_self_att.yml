@@ -75,7 +75,7 @@ model_attributes:
         # 300 for FastText and 50 for order vectors
         context_dim: 350
     text_embeddings:
-    - type: attention
+    - type: self_attn
       params:
         hidden_dim: 1024
         num_layers: 1

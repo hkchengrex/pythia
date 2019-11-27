@@ -7,6 +7,7 @@ from functools import lru_cache
 import numpy as np
 import torch
 from torch import nn
+from torch.nn import functional as F
 
 from pythia.modules.attention import AttentionLayer
 from pythia.modules.layers import Identity
@@ -32,6 +33,10 @@ class TextEmbedding(nn.Module):
             self.module = BiLSTMTextEmbedding(**kwargs)
         elif emb_type == "attention":
             self.module = AttentionTextEmbedding(**kwargs)
+        elif emb_type == "self_attn":
+            self.module = SelfTextMultiHeadAttention(**kwargs)
+        elif emb_type == "merger":
+            self.module = SelfMergeAttention(**kwargs)
         elif emb_type == "torch":
             vocab_size = kwargs["vocab_size"]
             embedding_dim = kwargs["embedding_dim"]
@@ -156,6 +161,7 @@ class AttentionTextEmbedding(nn.Module):
         self.relu = nn.ReLU()
 
     def forward(self, x):
+
         batch_size = x.size(0)
 
         self.recurrent_unit.flatten_parameters()
@@ -175,7 +181,122 @@ class AttentionTextEmbedding(nn.Module):
         # N * (conv2_out * hidden_dim)
         qtt_feature_concat = qtt_feature.view(batch_size, -1)
 
+        # print(qtt_feature_concat.shape)
+
         return qtt_feature_concat
+
+
+class SelfMergeAttention(nn.Module):
+    def __init__(self, **kwargs):
+        super(SelfMergeAttention, self).__init__()
+
+        self.text_out_dim = kwargs["hidden_dim"] * kwargs["conv2_out"]
+
+        self.m1 = AttentionTextEmbedding(**kwargs)
+        self.m2 = SelfTextMultiHeadAttention(**kwargs)
+        self.merger = nn.Linear(4096, 2048)
+
+    def forward(self, x):
+        x1 = self.m1(x)
+        x2 = self.m2(x)
+
+        x = torch.cat([x1, x2], 1)
+        return self.merger(x)
+
+
+# https://github.com/jadore801120/attention-is-all-you-need-pytorch/blob/master/transformer/SubLayers.py
+class SelfTextMultiHeadAttention(nn.Module):
+    def __init__(self, hidden_dim, embedding_dim, num_layers, dropout, **kwargs):
+        super(SelfTextMultiHeadAttention, self).__init__()
+
+        self.text_out_dim = hidden_dim * kwargs["conv2_out"]
+        n_head = 4
+        self.n_head = n_head
+
+        self.in_pro = nn.Sequential(
+            nn.Conv1d(embedding_dim, embedding_dim, kernel_size=1),
+            nn.LeakyReLU(0.25),
+            nn.Conv1d(embedding_dim, embedding_dim, kernel_size=1),
+        )
+
+        self.q_dim = 256
+        self.v_dim = 512
+
+        self.w_qs_1 = nn.Linear(embedding_dim, n_head * self.q_dim)
+        self.w_ks_1 = nn.Linear(embedding_dim, n_head * self.q_dim)
+        self.w_vs_1 = nn.Linear(embedding_dim, n_head * self.v_dim)
+        nn.init.normal_(self.w_qs_1.weight, mean=0, std=np.sqrt(2.0 / (embedding_dim + self.q_dim)))
+        nn.init.normal_(self.w_ks_1.weight, mean=0, std=np.sqrt(2.0 / (embedding_dim + self.q_dim)))
+        nn.init.normal_(self.w_vs_1.weight, mean=0, std=np.sqrt(2.0 / (embedding_dim + self.v_dim)))
+
+        self.layer_norm_1 = nn.LayerNorm(embedding_dim)
+        self.fc11 = nn.Linear(n_head * self.v_dim, embedding_dim)
+
+        self.w_qs_2 = nn.Linear(embedding_dim, n_head * self.q_dim)
+        self.w_ks_2 = nn.Linear(embedding_dim, n_head * self.q_dim)
+        self.w_vs_2 = nn.Linear(embedding_dim, n_head * self.v_dim)
+        nn.init.normal_(self.w_qs_2.weight, mean=0, std=np.sqrt(2.0 / (embedding_dim + self.q_dim)))
+        nn.init.normal_(self.w_ks_2.weight, mean=0, std=np.sqrt(2.0 / (embedding_dim + self.q_dim)))
+        nn.init.normal_(self.w_vs_2.weight, mean=0, std=np.sqrt(2.0 / (embedding_dim + self.v_dim)))
+
+        self.layer_norm_2 = nn.LayerNorm(embedding_dim)
+
+        self.fc12 = nn.Linear(n_head * self.v_dim, embedding_dim)
+        self.fc2 = nn.Linear(embedding_dim*14, 2048)
+
+    def forward(self, x):
+
+        x = x.permute(0, 2, 1)
+        x = self.in_pro(x)
+        x = x.permute(0, 2, 1).contiguous()
+
+        b, t, c = x.shape
+        x = x.view(b*t, -1)
+
+        q = self.w_qs_1(x).view(b, t, self.n_head, self.q_dim)
+        k = self.w_ks_1(x).view(b, t, self.n_head, self.q_dim)
+        v = self.w_vs_1(x).view(b, t, self.n_head, self.v_dim)
+
+        q = q.permute(2, 0, 1, 3).contiguous().view(-1, t, self.q_dim) # (n*b) x lq x dk
+        k = k.permute(2, 0, 1, 3).contiguous().view(-1, t, self.q_dim) # (n*b) x lk x dk
+        v = v.permute(2, 0, 1, 3).contiguous().view(-1, t, self.v_dim) # (n*b) x lv x dv
+
+        attn = torch.bmm(q, k.transpose(1, 2))
+        attn = F.softmax(attn, dim=2)
+        x = torch.bmm(attn, v)
+
+        x = x.view(self.n_head, b, t, self.v_dim)
+        x = x.permute(1, 2, 0, 3).contiguous().view(b, t, -1) # b x lq x (n*dv)
+
+        x = F.relu(self.fc11(x), inplace=True)
+        x = self.layer_norm_1(x)
+
+        # Second layer
+        b, t, c = x.shape
+        x = x.view(b*t, -1)
+
+        q = self.w_qs_2(x).view(b, t, self.n_head, self.q_dim)
+        k = self.w_ks_2(x).view(b, t, self.n_head, self.q_dim)
+        v = self.w_vs_2(x).view(b, t, self.n_head, self.v_dim)
+
+        q = q.permute(2, 0, 1, 3).contiguous().view(-1, t, self.q_dim) # (n*b) x lq x dk
+        k = k.permute(2, 0, 1, 3).contiguous().view(-1, t, self.q_dim) # (n*b) x lk x dk
+        v = v.permute(2, 0, 1, 3).contiguous().view(-1, t, self.v_dim) # (n*b) x lv x dv
+
+        attn = torch.bmm(q, k.transpose(1, 2))
+        attn = F.softmax(attn, dim=2)
+        x = torch.bmm(attn, v)
+
+        x = x.view(self.n_head, b, t, self.v_dim)
+        x = x.permute(1, 2, 0, 3).contiguous().view(b, t, -1) # b x lq x (n*dv)
+
+        x = F.relu(self.fc12(x), inplace=True)
+        x = self.layer_norm_2(x)
+
+        x = x.view(b, -1)
+        x = self.fc2(x)
+
+        return x
 
 
 class ImageEmbedding(nn.Module):
