@@ -24,6 +24,8 @@ class LoRRA(Pythia):
 
 
         self.attn1 = ProjectAttention(128, 4096+350, 2048)
+        self.attn2 = ProjectAttention(128, 2048+350, 2048)
+        self.attn3 = ProjectAttention(50, 4096+2048, 2048)
 
         super().build()
 
@@ -60,10 +62,16 @@ class LoRRA(Pythia):
         # print(text_embedding_total.shape, image_embedding_total.shape, context_embedding_total.shape)
 
         text_embedding_total = text_embedding_total.view(128, 16, -1)
-        attn1_weight = self.attn1(text_embedding_total.view(128, 16, -1), torch.cat([image_embedding_total, context_embedding_total], 1))
+        attn_weight = self.attn1(text_embedding_total.view(128, 16, -1), torch.cat([image_embedding_total, context_embedding_total], 1))
 
-        text_embedding_total = attn1_weight * text_embedding_total
+        text_embedding_total = attn_weight * text_embedding_total
         text_embedding_total = text_embedding_total.view(128, -1)
+
+        image_embedding_total = image_embedding_total.view(128, 32, -1)
+        attn_weight = self.attn2(image_embedding_total.view(128, 32, -1), torch.cat([text_embedding_total, context_embedding_total], 1))
+
+        image_embedding_total = attn_weight * image_embedding_total
+        image_embedding_total = image_embedding_total.view(128, -1)
 
         if self.inter_model is not None:
             image_embedding_total = self.inter_model(image_embedding_total)
