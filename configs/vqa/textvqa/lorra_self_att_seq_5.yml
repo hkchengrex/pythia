@@ -94,7 +94,7 @@ optimizer_attributes:
   params:
     eps: 1.0e-08
     lr: 0.01
-    weight_decay: 0
+    weight_decay: 0.000001
   type: Adamax
 training_parameters:
     experiment_name: lorra_textvqa1
@@ -105,11 +105,12 @@ training_parameters:
     max_grad_l2_norm: 0.25
     lr_scheduler: true
     lr_steps:
-    - 14000
-    lr_ratio: 0.01
+    - 7000
+    - 15000
+    lr_ratio: 0.1
     use_warmup: true
     warmup_factor: 0.2
-    warmup_iterations: 1000
+    warmup_iterations: 3000
     max_iterations: 24000
     batch_size: 128
     num_workers: 1

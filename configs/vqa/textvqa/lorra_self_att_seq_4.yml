@@ -75,7 +75,7 @@ model_attributes:
         # 300 for FastText and 50 for order vectors
         context_dim: 350
     text_embeddings:
-    - type: self_attn
+    - type: self_seq_att
       params:
         hidden_dim: 1024
         num_layers: 1
@@ -94,20 +94,21 @@ optimizer_attributes:
   params:
     eps: 1.0e-08
     lr: 0.001
-    weight_decay: 0
+    weight_decay: 0.000001
   type: Adamax
 training_parameters:
     experiment_name: lorra_textvqa1
-    device: cuda
+    device: cuda:5
     save_dir: "./save"
     clip_norm_mode: all
     clip_gradients: true
     max_grad_l2_norm: 0.25
     lr_scheduler: true
     lr_steps:
-    - 14000
-    lr_ratio: 0.01
-    use_warmup: true
+    - 7000
+    - 15000
+    lr_ratio: 0.1
+    use_warmup: false
     warmup_factor: 0.2
     warmup_iterations: 1000
     max_iterations: 24000
