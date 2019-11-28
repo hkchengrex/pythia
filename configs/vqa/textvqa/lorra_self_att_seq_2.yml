@@ -98,7 +98,7 @@ optimizer_attributes:
   type: Adamax
 training_parameters:
     experiment_name: lorra_textvqa1
-    device: cuda
+    device: cuda:6
     save_dir: "./save"
     clip_norm_mode: all
     clip_gradients: true
