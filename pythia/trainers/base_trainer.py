@@ -349,31 +349,31 @@ class BaseTrainer:
     def _try_full_validation(self, force=False):
         should_break = False
 
-        if self.current_iteration % self.snapshot_interval == 0 or force:
-            self.writer.write("Evaluation time. Running on full validation set...")
-            # Validation and Early stopping
-            # Create a new meter for this case
-            report, meter = self.evaluate(self.val_loader)
+        # if self.current_iteration % self.snapshot_interval == 0 or force:
+        #     self.writer.write("Evaluation time. Running on full validation set...")
+        #     # Validation and Early stopping
+        #     # Create a new meter for this case
+        #     report, meter = self.evaluate(self.val_loader)
 
-            extra = {"validation time": self.snapshot_timer.get_time_since_start()}
+        #     extra = {"validation time": self.snapshot_timer.get_time_since_start()}
 
-            stop = self.early_stopping(self.current_iteration, meter)
-            stop = bool(broadcast_scalar(stop, src=0, device=self.device))
+        #     stop = self.early_stopping(self.current_iteration, meter)
+        #     stop = bool(broadcast_scalar(stop, src=0, device=self.device))
 
-            extra.update(self.early_stopping.get_info())
+        #     extra.update(self.early_stopping.get_info())
 
-            prefix = "{}: full val".format(report.dataset_name)
+        #     prefix = "{}: full val".format(report.dataset_name)
 
-            self._summarize_report(meter, prefix=prefix, extra=extra)
-            self.snapshot_timer.reset()
-            gc.collect()
+        #     self._summarize_report(meter, prefix=prefix, extra=extra)
+        #     self.snapshot_timer.reset()
+        #     gc.collect()
 
-            if "cuda" in str(self.device):
-                torch.cuda.empty_cache()
+        #     if "cuda" in str(self.device):
+        #         torch.cuda.empty_cache()
 
-            if stop is True:
-                self.writer.write("Early stopping activated")
-                should_break = True
+        #     if stop is True:
+        #         self.writer.write("Early stopping activated")
+        #         should_break = True
 
         return should_break
 
