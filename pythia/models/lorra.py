@@ -25,7 +25,7 @@ class LoRRA(Pythia):
 
         self.attn1 = ProjectAttention(128, 4096+350, 2048)
         self.attn2 = ProjectAttention(128, 2048+350, 2048)
-        self.attn3 = ProjectAttention(50, 4096+2048, 2048)
+        self.attn3 = ProjectAttention(35, 4096+2048, 1024)
 
         super().build()
 
@@ -45,6 +45,7 @@ class LoRRA(Pythia):
         return 2 * super()._get_classifier_input_dim()
 
     def forward(self, sample_list):
+
         sample_list.text = self.word_embedding(sample_list.text)
         text_embedding_total = self.process_text_embedding(sample_list)
 
@@ -61,17 +62,25 @@ class LoRRA(Pythia):
         # 128*1*2048, 128*2*2048, 128*1*350
         # print(text_embedding_total.shape, image_embedding_total.shape, context_embedding_total.shape)
 
-        text_embedding_total = text_embedding_total.view(128, 16, -1)
-        attn_weight = self.attn1(text_embedding_total.view(128, 16, -1), torch.cat([image_embedding_total, context_embedding_total], 1))
+        b = text_embedding_total.shape[0]
+
+        text_embedding_total = text_embedding_total.view(b, 16, -1)
+        attn_weight = self.attn1(text_embedding_total.view(b, 16, -1), torch.cat([image_embedding_total, context_embedding_total], 1))
 
         text_embedding_total = attn_weight * text_embedding_total
-        text_embedding_total = text_embedding_total.view(128, -1)
+        text_embedding_total = text_embedding_total.view(b, -1)
 
-        image_embedding_total = image_embedding_total.view(128, 32, -1)
-        attn_weight = self.attn2(image_embedding_total.view(128, 32, -1), torch.cat([text_embedding_total, context_embedding_total], 1))
+        image_embedding_total = image_embedding_total.view(b, 32, -1)
+        attn_weight = self.attn2(image_embedding_total.view(b, 32, -1), torch.cat([text_embedding_total, context_embedding_total], 1))
 
         image_embedding_total = attn_weight * image_embedding_total
-        image_embedding_total = image_embedding_total.view(128, -1)
+        image_embedding_total = image_embedding_total.view(b, -1)
+
+        context_embedding_total = context_embedding_total.view(b, 10, -1)
+        attn_weight = self.attn3(context_embedding_total.view(b, 10, -1), torch.cat([image_embedding_total, text_embedding_total], 1))
+
+        context_embedding_total = attn_weight * context_embedding_total
+        context_embedding_total = context_embedding_total.view(b, -1)
 
         if self.inter_model is not None:
             image_embedding_total = self.inter_model(image_embedding_total)

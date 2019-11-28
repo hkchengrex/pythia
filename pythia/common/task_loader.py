@@ -75,6 +75,7 @@ class TaskLoader:
             pin_memory=pin_memory,
             collate_fn=BatchCollator(),
             num_workers=num_workers,
+            drop_last=True,
             **other_args
         )
 
