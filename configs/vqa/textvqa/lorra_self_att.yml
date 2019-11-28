@@ -93,7 +93,7 @@ model_attributes:
 optimizer_attributes:
   params:
     eps: 1.0e-08
-    lr: 0.01
+    lr: 0.001
     weight_decay: 0
   type: Adamax
 training_parameters:
