@@ -309,6 +309,7 @@ class NonLinearElementMultiply(nn.Module):
             question_fa_expand = question_fa
 
         joint_feature = image_fa * question_fa_expand
+        # print(joint_feature.shape)
 
         if context_embedding is not None:
             context_fa = self.fa_context(context_embedding)

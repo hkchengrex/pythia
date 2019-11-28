@@ -4,6 +4,7 @@ import torch
 from pythia.common.registry import registry
 from pythia.models.pythia import Pythia
 from pythia.modules.layers import ClassifierLayer
+from pythia.modules.attention import ProjectAttention
 
 
 @registry.register_model("lorra")
@@ -20,6 +21,10 @@ class LoRRA(Pythia):
         self._init_text_embeddings("context")
         self._init_feature_encoders("context")
         self._init_feature_embeddings("context")
+
+
+        self.attn1 = ProjectAttention(128, 4096+350, 2048)
+
         super().build()
 
     def get_optimizer_parameters(self, config):
@@ -41,6 +46,8 @@ class LoRRA(Pythia):
         sample_list.text = self.word_embedding(sample_list.text)
         text_embedding_total = self.process_text_embedding(sample_list)
 
+        # text_embedding_total: [128*1*2048]
+
         image_embedding_total, _ = self.process_feature_embedding(
             "image", sample_list, text_embedding_total
         )
@@ -48,6 +55,15 @@ class LoRRA(Pythia):
         context_embedding_total, _ = self.process_feature_embedding(
             "context", sample_list, text_embedding_total, ["order_vectors"]
         )
+        
+        # 128*1*2048, 128*2*2048, 128*1*350
+        # print(text_embedding_total.shape, image_embedding_total.shape, context_embedding_total.shape)
+
+        text_embedding_total = text_embedding_total.view(128, 16, -1)
+        attn1_weight = self.attn1(text_embedding_total.view(128, 16, -1), torch.cat([image_embedding_total, context_embedding_total], 1))
+
+        text_embedding_total = attn1_weight * text_embedding_total
+        text_embedding_total = text_embedding_total.view(128, -1)
 
         if self.inter_model is not None:
             image_embedding_total = self.inter_model(image_embedding_total)
