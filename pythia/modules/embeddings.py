@@ -39,6 +39,8 @@ class TextEmbedding(nn.Module):
             self.module = SelfMergeAttention(**kwargs)
         elif emb_type == 'self_seq_att':
             self.module = SelfSeqAttention(**kwargs)
+        elif emb_type == 'self_seq_att_2':
+            self.module = SelfSeqAttention2(**kwargs)
         elif emb_type == "torch":
             vocab_size = kwargs["vocab_size"]
             embedding_dim = kwargs["embedding_dim"]
@@ -294,6 +296,150 @@ class SelfSeqAttention(nn.Module):
         x = self.p_conv1(x)
         x = x.permute(0, 2, 1).contiguous()
         x = self.layer_norm_1(x)
+
+        batch_size = x.size(0)
+
+        self.recurrent_unit.flatten_parameters()
+        # self.recurrent_unit.flatten_parameters()
+        lstm_out, _ = self.recurrent_unit(x)  # N * T * hidden_dim
+        lstm_drop = self.dropout(lstm_out)  # N * T * hidden_dim
+        lstm_reshape = lstm_drop.permute(0, 2, 1)  # N * hidden_dim * T
+
+        qatt_conv1 = self.conv1(lstm_reshape)  # N x conv1_out x T
+        qatt_relu = self.relu(qatt_conv1)
+        qatt_conv2 = self.conv2(qatt_relu)  # N x conv2_out x T
+
+        # Over last dim
+        qtt_softmax = nn.functional.softmax(qatt_conv2, dim=2)
+        # N * conv2_out * hidden_dim
+        qtt_feature = torch.bmm(qtt_softmax, lstm_drop)
+        # N * (conv2_out * hidden_dim)
+        qtt_feature_concat = qtt_feature.view(batch_size, -1)
+
+        # print(qtt_feature_concat.shape)
+
+        return qtt_feature_concat
+
+# https://github.com/jadore801120/attention-is-all-you-need-pytorch/blob/master/transformer/SubLayers.py
+class SelfSeqAttention2(nn.Module):
+    def __init__(self, hidden_dim, embedding_dim, num_layers, dropout, **kwargs):
+        super(SelfSeqAttention2, self).__init__()
+
+        self.text_out_dim = hidden_dim * kwargs["conv2_out"]
+        n_head = 4
+        self.n_head = n_head
+
+        self.in_pro = nn.Sequential(
+            nn.Conv1d(embedding_dim, embedding_dim, kernel_size=1),
+            nn.LeakyReLU(0.25),
+            nn.Conv1d(embedding_dim, embedding_dim, kernel_size=1),
+        )
+
+        self.q_dim = 256
+        self.v_dim = 512
+
+        self.w_qs_1 = nn.Linear(embedding_dim, n_head * self.q_dim)
+        self.w_ks_1 = nn.Linear(embedding_dim, n_head * self.q_dim)
+        self.w_vs_1 = nn.Linear(embedding_dim, n_head * self.v_dim)
+        nn.init.normal_(self.w_qs_1.weight, mean=0, std=np.sqrt(2.0 / (embedding_dim + self.q_dim)))
+        nn.init.normal_(self.w_ks_1.weight, mean=0, std=np.sqrt(2.0 / (embedding_dim + self.q_dim)))
+        nn.init.normal_(self.w_vs_1.weight, mean=0, std=np.sqrt(2.0 / (embedding_dim + self.v_dim)))
+
+        self.layer_norm_1 = nn.LayerNorm(embedding_dim)
+        self.p_conv1 = nn.Conv1d(n_head * self.v_dim, embedding_dim, kernel_size=1)
+
+        self.w_qs_2 = nn.Linear(embedding_dim, n_head * self.q_dim)
+        self.w_ks_2 = nn.Linear(embedding_dim, n_head * self.q_dim)
+        self.w_vs_2 = nn.Linear(embedding_dim, n_head * self.v_dim)
+        nn.init.normal_(self.w_qs_2.weight, mean=0, std=np.sqrt(2.0 / (embedding_dim + self.q_dim)))
+        nn.init.normal_(self.w_ks_2.weight, mean=0, std=np.sqrt(2.0 / (embedding_dim + self.q_dim)))
+        nn.init.normal_(self.w_vs_2.weight, mean=0, std=np.sqrt(2.0 / (embedding_dim + self.v_dim)))
+
+        self.layer_norm_2 = nn.LayerNorm(embedding_dim)
+        self.p_conv2 = nn.Conv1d(n_head * self.v_dim, embedding_dim, kernel_size=1)
+
+        bidirectional = kwargs.get("bidirectional", False)
+
+        self.recurrent_unit = nn.LSTM(
+            input_size=embedding_dim,
+            hidden_size=hidden_dim // 2 if bidirectional else hidden_dim,
+            num_layers=num_layers,
+            batch_first=True,
+            bidirectional=bidirectional,
+        )
+
+        self.dropout = nn.Dropout(p=dropout)
+
+        conv1_out = kwargs["conv1_out"]
+        conv2_out = kwargs["conv2_out"]
+        kernel_size = kwargs["kernel_size"]
+        padding = kwargs["padding"]
+
+        self.conv1 = nn.Conv1d(
+            in_channels=hidden_dim,
+            out_channels=conv1_out,
+            kernel_size=kernel_size,
+            padding=padding,
+        )
+
+        self.conv2 = nn.Conv1d(
+            in_channels=conv1_out,
+            out_channels=conv2_out,
+            kernel_size=kernel_size,
+            padding=padding,
+        )
+
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+
+        x = x.permute(0, 2, 1)
+        x = self.in_pro(x)
+        x = x.permute(0, 2, 1).contiguous()
+
+        b, t, c = x.shape
+        x = x.view(b*t, -1)
+
+        q = self.w_qs_1(x).view(b, t, self.n_head, self.q_dim)
+        k = self.w_ks_1(x).view(b, t, self.n_head, self.q_dim)
+        v = self.w_vs_1(x).view(b, t, self.n_head, self.v_dim)
+
+        q = q.permute(2, 0, 1, 3).contiguous().view(-1, t, self.q_dim) # (n*b) x lq x dk
+        k = k.permute(2, 0, 1, 3).contiguous().view(-1, t, self.q_dim) # (n*b) x lk x dk
+        v = v.permute(2, 0, 1, 3).contiguous().view(-1, t, self.v_dim) # (n*b) x lv x dv
+
+        attn = torch.bmm(q, k.transpose(1, 2))
+        attn = F.softmax(attn, dim=2)
+        x = torch.bmm(attn, v)
+
+        x = x.view(self.n_head, b, t, self.v_dim)
+        x = x.permute(1, 0, 3, 2).contiguous().view(b, -1, t)
+
+        x = self.p_conv1(x)
+        x = x.permute(0, 2, 1).contiguous()
+        x = self.layer_norm_1(x)
+
+        # Second
+        x = x.view(b*t, -1)
+
+        q = self.w_qs_2(x).view(b, t, self.n_head, self.q_dim)
+        k = self.w_ks_2(x).view(b, t, self.n_head, self.q_dim)
+        v = self.w_vs_2(x).view(b, t, self.n_head, self.v_dim)
+
+        q = q.permute(2, 0, 1, 3).contiguous().view(-1, t, self.q_dim) # (n*b) x lq x dk
+        k = k.permute(2, 0, 1, 3).contiguous().view(-1, t, self.q_dim) # (n*b) x lk x dk
+        v = v.permute(2, 0, 1, 3).contiguous().view(-1, t, self.v_dim) # (n*b) x lv x dv
+
+        attn = torch.bmm(q, k.transpose(1, 2))
+        attn = F.softmax(attn, dim=2)
+        x = torch.bmm(attn, v)
+
+        x = x.view(self.n_head, b, t, self.v_dim)
+        x = x.permute(1, 0, 3, 2).contiguous().view(b, -1, t)
+
+        x = self.p_conv2(x)
+        x = x.permute(0, 2, 1).contiguous()
+        x = self.layer_norm_2(x)
 
         batch_size = x.size(0)
 
