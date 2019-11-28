@@ -70,11 +70,11 @@ class LoRRA(Pythia):
         text_embedding_total = attn_weight * text_embedding_total
         text_embedding_total = text_embedding_total.view(b, -1)
 
-        image_embedding_total = image_embedding_total.view(b, 32, -1)
-        attn_weight = self.attn2(image_embedding_total.view(b, 32, -1), torch.cat([text_embedding_total, context_embedding_total], 1))
+        # image_embedding_total = image_embedding_total.view(b, 32, -1)
+        # attn_weight = self.attn2(image_embedding_total.view(b, 32, -1), torch.cat([text_embedding_total, context_embedding_total], 1))
 
-        image_embedding_total = attn_weight * image_embedding_total
-        image_embedding_total = image_embedding_total.view(b, -1)
+        # image_embedding_total = attn_weight * image_embedding_total
+        # image_embedding_total = image_embedding_total.view(b, -1)
 
         # context_embedding_total = context_embedding_total.view(b, 10, -1)
         # attn_weight = self.attn3(context_embedding_total.view(b, 10, -1), torch.cat([image_embedding_total, text_embedding_total], 1))
